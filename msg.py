@@ -4,14 +4,16 @@ import socket,sys
 import time
 import copy
 import select
+import json
 
 class Node:
 
 	MSG_LEN = 256
 	
-	#addr ip:port
+	#addr: ip:port
 	def __init__(self,bind_addr=None,peer_addrs=None,timeout = 5):
 		
+		#print bind_addr,peer_addrs,timeout
 		self.timeout = timeout
 		
 		if bind_addr is not None :
@@ -26,93 +28,109 @@ class Node:
 			self.bind_addr = None
 
 		self.peer_addrs = [x.split(':') for x in peer_addrs.split()] if peer_addrs is not None else []
-		self.sockets = []
-		sock = {}
-		for addr in self.peer_addrs :
-			sock['addr'] = addr
-			sock['connect-to'] = True
-			sock['connect'] = False
-			sock['rbuf'] = []
-			sock['sbuf'] = []
-			sock['sock'] = None
-			self.sockets.append(copy.copy(sock))
-			
-		print self.bind_addr,self.peer_addrs,self.timeout
-		print self.sockets
+		self.peers = []
 
-	def send(self,sock,msg):
+		for addr in self.peer_addrs :
+			self.create_peer({'addr':addr,'connect-to':True,'connected':False,'sock':None})
+			
+		#print self.bind_addr,self.peer_addrs,self.timeout
+		#print self.peers
+
+	def create_peer(self,d):
+		peer = {}
+		peer['addr'] = d['addr']
+		peer['connect-to'] = d['connect-to']
+		peer['connected'] = d['connected']
+		peer['rbuf'] = []
+		peer['sbuf'] = []
+		peer['sock'] = d['sock']
+		self.peers.append(peer)
+		return peer
+		
+	def send_msg(self,peer,msg):
+		msg = json.dumps(msg)
 		assert(len(msg) < Node.MSG_LEN)
-		return sock['sbuf'].append(msg + ' ' * (Node.MSG_LEN-len(msg)) )
+		peer['sbuf'].append(msg + ' ' * (Node.MSG_LEN-len(msg)) )
 	
-	def recv(self,sock):
-		if len(sock['rbuf']) > 0:
-			return sock['rbuf'].pop(0)
+	def recv_msg(self,peer):
+		if len(peer['rbuf']) > 0:
+			return json.loads(peer['rbuf'].pop(0))
 		else :
 			return None
 	
-	def do_event(self,event_id,sock):
-		print event_id,sock
-		if event_id == 'read' :
-			msg = self.recv(sock)
-			self.send(sock,msg)
+	def do_timeout(self,peer):
+		print 'time out'
+	
+	def do_read(self,peer):
+		msg = self.recv_msg(peer)
+		self.send_msg(peer,msg)
+		
+	def do_connect(self,peer):
+		print 'connect'
+	
+	def do_accept(self,peer):
+		print 'accept'
+	
+	def do_event(self,event_id,peer):
+		funcs = { 	'connect':self.do_connect, 
+					'timeout':self.do_timeout,
+					'accept':self.do_accept,
+					'read':self.do_read }
+					
+		#print  event_id,peer
+		funcs.get(event_id)(peer)
 
 	def loop(self):
+		oldtime = time.time()
 		while True:
 			# 1. connect
-			for sock in self.sockets:
-				if not sock['connect']:
+			for peer in self.peers:
+				if not peer['connected']:
 					s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-					s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+					s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 2)
 					s.settimeout(3)
 					try :
-						s.connect((sock['addr'][0],int(sock['addr'][1])))
-						sock['connect'] = True
+						s.connect((peer['addr'][0],int(peer['addr'][1])))
+						peer['connected'] = True
 						s.settimeout(None)
 						
-						sock['sock'] = s
-						self.do_event('connect',sock)
+						peer['sock'] = s
+						self.do_event('connect',peer)
 					except:
 						s.close()
 					
 			# 2. select
-			socks = [x['sock'] for x in self.sockets if x['connect']] 
+			socks = [x['sock'] for x in self.peers if x['connected']] 
 			if self.bindsock is not None : socks = socks + [self.bindsock]
-			print socks
+			#print socks
 			
 			readable , writable , exceptional = select.select(socks, [], socks, 1)
 			
-			print readable,writable,exceptional
+			#print readable,writable,exceptional
 			
 			if self.bindsock in readable :
 				#accept
 				conn,addr=self.bindsock.accept()
 				print conn,addr
-				sock = {}
-				sock['addr'] = addr
-				sock['connect-to'] = False
-				sock['connect'] = True
-				sock['rbuf'] = []
-				sock['sbuf'] = []
-				sock['sock'] = conn
-				self.sockets.append(copy.copy(sock))
-				self.do_event('accept',self.sockets[-1])
+				peer = self.create_peer({'addr':addr,'connect-to':False,'connected':True,'sock':conn})
+				self.do_event('accept',peer)
 			
 			for s in readable :
 				#read
-				for s1 in self.sockets :
-					if s1['sock'] == s :
+				for peer in self.peers :
+					if peer['sock'] == s :
 						msg = s.recv(Node.MSG_LEN)
-						print msg
+						#print msg.strip()
 						if len(msg) == 0:
 							#error
-							s1['sock'].close()
-							s1['sock'] = None
-							s1['connect'] = False
-							if not s1['connect-to'] :
-								self.sockets.remove(s1)
+							peer['sock'].close()
+							peer['sock'] = None
+							peer['connected'] = False
+							if not peer['connect-to'] :
+								self.peers.remove(peer)
 						else :
-							s1['rbuf'].append(msg.strip())
-							self.do_event('read',s1)
+							peer['rbuf'].append(msg.strip())
+							self.do_event('read',peer)
 						break
 						
 			for s in exceptional:
@@ -120,17 +138,23 @@ class Node:
 				assert(False)
 			
 			# 3. send
-			for s in self.sockets :
-				for msg in s['sbuf'] :
-					s['sock'].send(msg)
-				s['sbuf'] = []
-				
+			for peer in self.peers :
+				if peer['connected']:
+					for msg in peer['sbuf'] :
+						peer['sock'].send(msg)
+					peer['sbuf'] = []
+			
+			#4. check timout
+			delta_time = time.time() - oldtime
+			if delta_time >= self.timeout:
+				self.do_event('timeout',None)
+				oldtime = time.time()
 	
 if __name__ == '__main__':
 	
-	#n = Node(None,'10.74.120.2:9132 10.17.12.34:23',10)
-	n = Node('10.74.120.2:1234',None,10)
-	#n = Node('10.74.120.2:1234','10.74.120.2:9132 10.17.12.34:23',10)
+	n = Node(None,'10.74.120.2:9132 10.74.120.2:1234',5)
+	#n = Node('10.74.120.2:1234',None,10)
+	#n = Node('10.74.120.2:1234','10.74.120.2:9132 10.74.120.2:9133',10)
 	
 	n.loop()
 	

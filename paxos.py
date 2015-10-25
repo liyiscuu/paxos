@@ -18,11 +18,11 @@ ID = 0
 def get_config():
 	conf = ConfigParser.ConfigParser()
 	conf.read(config_file)
-	return  conf.items("main")
+	d = {}
+	for item in conf.items("main"):
+		d[item[0]] = item[1]
+	return d
 
-
-
-	
 if __name__ == '__main__':
 	try:
 		opts, args = getopt.getopt(sys.argv[1:], "c:t:")
@@ -31,7 +31,10 @@ if __name__ == '__main__':
 		sys.exit(-1)
 	
 	t = os.getenv('PAXOS_TYPE')
-	if t is not None: type = t
+	if t is not None: TYPE = t
+	
+	id = os.getenv('PAXOS_ID')
+	if id is not None: ID = int(id)
 	
 	# option processing
 	for option, value in opts:
@@ -40,15 +43,17 @@ if __name__ == '__main__':
 		if option == "-t":
 			TYPE = value
  
-	print 'Config File : %s, Type : %s' % (config_file,TYPE)
+	#print 'Config File : %s, Type : %s' % (config_file,TYPE)
 	
 	params = get_config()
-
+	#print params
+	
 	if TYPE == 'acceptor':
 		node = acceptor.Acceptor(params,ID)
 	elif TYPE == 'proposer':
 		node = proposer.Proposer(params,ID)
-	
+	elif TYPE == 'client':
+		node = client.Client(params,ID)
 	
 	os.system("touch %d.pid" % os.getpid())
 	

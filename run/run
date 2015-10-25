@@ -1,4 +1,7 @@
 #!/bin/sh
 
-rm -f *.pid
-python ../paxos.py
+python stop.py
+
+PAXOS_TYPE=proposer PAXOS_ID=0 python ../paxos.py &
+PAXOS_TYPE=proposer PAXOS_ID=1 python ../paxos.py &
+PAXOS_TYPE=client python ../paxos.py &

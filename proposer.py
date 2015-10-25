@@ -10,16 +10,36 @@ import msg
 
 class Proposer(msg.Node):
 	def __init__(self,params,id):
+		
 		self.params = params
 		self.id = id
 		bind_addr,connect_addr = self.get_address()
+		print "Proposer Init:%d , bind_addr:%s, connect_addr:%s" % (id,str(bind_addr),str(connect_addr)) 
 		msg.Node.__init__(self,bind_addr,connect_addr)
 		
-	def get_address(self):
-		return ('10.74.120.2:1234','10.74.120.2:9132 10.17.12.34:23')
+		self.values = []
+		self.P1_insts = []
+		self.P2_insts = []
 		
-	def do_event(self,event_id,sock):
-		print "++++++++++" + event_id
-	
+	def get_address(self):
+		#print self.params
+		acceptors = self.params['acceptors']
+		proposers = self.params['proposers'].split()
+		
+		return (proposers[self.id],acceptors)
+		
+	def do_connect(self,peer):
+		peer['type'] = 'acceptor'
+		
+	def do_accept(self,peer):
+		peer['type'] = 'client'
+		
+	def do_read(self,peer):
+		msg = self.recv_msg(peer)
+		#print msg,peer
+		if peer['type'] == 'client':
+			self.values.append(msg)
+			print self.values
+		
 if __name__ == '__main__':
 	pass
