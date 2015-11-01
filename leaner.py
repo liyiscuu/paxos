@@ -6,7 +6,7 @@ import getopt
 import time
 import copy
 import msg
-
+from log import logout
 
 if __name__ == '__main__':
 	pass

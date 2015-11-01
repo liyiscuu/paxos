@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# coding=gbk
 import ConfigParser
 import random
 import sys,os
@@ -10,8 +11,9 @@ import proposer
 import acceptor
 import leaner
 import client
+import log
 
-config_file = '/home/liyi/work/paxos/paxos.conf'
+config_file = '../paxos.conf'
 TYPE = 'proposer'
 ID = 0
 
@@ -49,10 +51,13 @@ if __name__ == '__main__':
 	#print params
 	
 	if TYPE == 'acceptor':
+		log.set_log('Acceptor',ID,'on_blue')
 		node = acceptor.Acceptor(params,ID)
 	elif TYPE == 'proposer':
+		log.set_log('Proposer',ID,'on_green')
 		node = proposer.Proposer(params,ID)
 	elif TYPE == 'client':
+		log.set_log('Client',ID,'on_yellow')
 		node = client.Client(params,ID)
 	
 	os.system("touch %d.pid" % os.getpid())

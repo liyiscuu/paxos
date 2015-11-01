@@ -1,20 +1,32 @@
 #!/usr/bin/python
-
+# coding=gbk
 import socket,sys
 import time
 import copy
 import select
 import json
+from log import logout
+import log
 
+'''
+   client_req(v)
+   prepare_req : 	{'node_id','iid','paxos_id'}
+   accept_req : 	{'node_id','iid','paxos_id','value'}
+   prepare_ack:		{'node_id','iid','paxos_id','value_v','value_n'}
+   accept_ack:		{'node_id','iid','paxos_id','value_v','value_n'}
+   repeat()
+'''
+   
 class Node:
 
 	MSG_LEN = 256
 	
 	#addr: ip:port
-	def __init__(self,bind_addr=None,peer_addrs=None,timeout = 5):
+	def __init__(self,msg_handle,bind_addr=None,peer_addrs=None,timeout = 5):
 		
 		#print bind_addr,peer_addrs,timeout
 		self.timeout = timeout
+		self.msg_handle = msg_handle
 		
 		if bind_addr is not None :
 			self.bind_addr = bind_addr.split(':')
@@ -47,7 +59,10 @@ class Node:
 		self.peers.append(peer)
 		return peer
 		
-	def send_msg(self,peer,msg):
+	def send_msg(self,peer,msg_type,msg_data):
+		msg={}
+		msg['type']=msg_type
+		msg['data']=msg_data
 		msg = json.dumps(msg)
 		assert(len(msg) < Node.MSG_LEN)
 		peer['sbuf'].append(msg + ' ' * (Node.MSG_LEN-len(msg)) )
@@ -59,17 +74,19 @@ class Node:
 			return None
 	
 	def do_timeout(self,peer):
-		print 'time out'
+		logout(log.LOG_INFO,'time out')
 	
 	def do_read(self,peer):
 		msg = self.recv_msg(peer)
-		self.send_msg(peer,msg)
+		msg_type = msg['type']
+		self.msg_handle.get(msg_type)(msg['data'],peer)
+		#logout(log.LOG_ERROR, 'msg = %s' % str(msg))
 		
 	def do_connect(self,peer):
-		print 'connect'
+		logout(log.LOG_INFO,'connect to %s' % str(peer['addr']))
 	
 	def do_accept(self,peer):
-		print 'accept'
+		logout(log.LOG_INFO,'accept to %s' % str(peer['addr']))
 	
 	def do_event(self,event_id,peer):
 		funcs = { 	'connect':self.do_connect, 
@@ -111,7 +128,7 @@ class Node:
 			if self.bindsock in readable :
 				#accept
 				conn,addr=self.bindsock.accept()
-				print conn,addr
+				#print conn,addr
 				peer = self.create_peer({'addr':addr,'connect-to':False,'connected':True,'sock':conn})
 				self.do_event('accept',peer)
 			
@@ -119,10 +136,14 @@ class Node:
 				#read
 				for peer in self.peers :
 					if peer['sock'] == s :
-						msg = s.recv(Node.MSG_LEN)
+						try:
+							msg = s.recv(Node.MSG_LEN)
+						except:
+							msg=''
 						#print msg.strip()
 						if len(msg) == 0:
 							#error
+							logout(log.LOG_WARNING,'peer %s disconnected!' % str(peer['addr']))
 							peer['sock'].close()
 							peer['sock'] = None
 							peer['connected'] = False
@@ -149,7 +170,8 @@ class Node:
 			if delta_time >= self.timeout:
 				self.do_event('timeout',None)
 				oldtime = time.time()
-	
+			
+			#logout('LOG_INFO','==')
 if __name__ == '__main__':
 	
 	n = Node(None,'10.74.120.2:9132 10.74.120.2:1234',5)
